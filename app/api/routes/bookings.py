@@ -322,9 +322,9 @@ def cancel_booking(booking_id: int, token: str, db: Session = Depends(get_db)):
 
 
 # ---------------------------------------------------------------------
-# ADMIN — BOOKINGS OF OWN HALL
+# ADMIN — BOOKINGS OF OWN HALL (ENHANCED)
 # ---------------------------------------------------------------------
-@router.get("/admin/hall/{hall_id}", response_model=list[BookingOut])
+@router.get("/admin/hall/{hall_id}")
 def admin_hall_bookings(hall_id: int, token: str, db: Session = Depends(get_db)):
     admin, role = resolve_token_user(token, db)
 
@@ -339,29 +339,58 @@ def admin_hall_bookings(hall_id: int, token: str, db: Session = Depends(get_db))
     if not hall:
         raise HTTPException(status_code=404, detail="Hall not found")
 
+    # Ownership check
     if hall.admin_id != admin.id:
         raise HTTPException(status_code=403, detail="You do not own this hall")
 
-    bookings = db.query(Booking).filter(
-        Booking.hall_id == hall_id,
-        Booking.status == "booked"
-    ).all()
+    bookings = (
+        db.query(Booking)
+        .filter(Booking.hall_id == hall_id)
+        .order_by(Booking.start_date.desc())
+        .all()
+    )
 
-    return [
-        BookingOut(
-            id=b.id,
-            hall_id=b.hall_id,
-            start_date=b.start_date,
-            end_date=b.end_date,
-            start_time=b.start_time,
-            end_time=b.end_time,
-            status=b.status,
-            total_price=b.total_price,
-            booked_by_name=b.user.name,
-            booked_by_email=b.user.email,
-        )
-        for b in bookings
-    ]
+    response = []
+
+    for b in bookings:
+        response.append({
+            "booking_id": b.id,
+            "hall_id": b.hall_id,
+
+            # ---- DATE & TIME ----
+            "start_date": b.start_date,
+            "end_date": b.end_date,
+            "start_time": b.start_time,
+            "end_time": b.end_time,
+
+            # ---- BOOKING STATUS ----
+            "booking_status": b.status,  # booked / cancelled
+
+            # ---- PAYMENT INFO ----
+            "payment_mode": b.payment_mode,
+            "payment_status": b.payment_status,   # pending / success / failed
+            "is_paid": True if b.payment_status == "success" else False,
+
+            # ---- REFUND (future-proof) ----
+            "is_refunded": getattr(b, "refund_status", None) == "success",
+
+            # ---- USER INFO ----
+            "booked_by": {
+                "user_id": b.user.id,
+                "name": b.user.name,
+                "email": b.user.email,
+            },
+
+            # ---- CANCELLATION INFO ----
+            "cancelled_by": (
+                "user" if b.status == "cancelled" else None
+            ),
+
+            # ---- AMOUNT ----
+            "total_price": b.total_price,
+        })
+
+    return response
 
 
 # =====================================================================
