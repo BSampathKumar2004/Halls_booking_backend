@@ -22,19 +22,28 @@ def get_db():
         db.close()
 
 
-def validate_admin(token: str):
+def validate_admin(token: str, db: Session):
     try:
         payload = jwt.decode(
             token,
             os.getenv("JWT_SECRET"),
             algorithms=[os.getenv("JWT_ALGORITHM")]
         )
+
         if payload.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Admins only")
-        return payload.get("sub")
-    except:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-        
+
+        admin = db.query(Admin).filter(
+            Admin.email == payload.get("sub")
+        ).first()
+
+        if not admin:
+            raise HTTPException(status_code=404, detail="Admin not found")
+
+        return admin
+
+    except jwt.JWTError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")       
 
 # ---------------- Get All Users ----------------
 @router.get("/users", response_model=list[UserOut])
