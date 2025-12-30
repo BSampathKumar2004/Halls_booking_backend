@@ -22,28 +22,19 @@ def get_db():
         db.close()
 
 
-def validate_admin(token: str, db: Session):
+def validate_admin(token: str):
     try:
         payload = jwt.decode(
             token,
             os.getenv("JWT_SECRET"),
             algorithms=[os.getenv("JWT_ALGORITHM")]
         )
-
         if payload.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Admins only")
-
-        admin = db.query(Admin).filter(
-            Admin.email == payload.get("sub")
-        ).first()
-
-        if not admin:
-            raise HTTPException(status_code=404, detail="Admin not found")
-
-        return admin
-
-    except jwt.JWTError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")       
+        return payload.get("sub")
+    except:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        
 
 # ---------------- Get All Users ----------------
 @router.get("/users", response_model=list[UserOut])
@@ -62,8 +53,8 @@ def get_all_admins(token: str, db: Session = Depends(get_db)):
 # ---------------- Get All Halls ----------------
 @router.get("/halls", response_model=list[HallOut])
 def get_all_halls(token: str, db: Session = Depends(get_db)):
-    validate_admin(token, db)
-    halls = db.query(Hall).filter(Hall.deleted == False , Hall.admin_id == admin.id).all()
+    validate_admin(token)
+    halls = db.query(Hall).filter(Hall.deleted == False).all()
 
     # attach amenities for each hall
     for hall in halls:
