@@ -54,9 +54,17 @@ def get_all_admins(token: str, db: Session = Depends(get_db)):
 @router.get("/halls", response_model=list[HallOut])
 def get_all_halls(token: str, db: Session = Depends(get_db)):
     validate_admin(token)
-    halls = db.query(Hall).filter(Hall.deleted == False).all()
+    admin_id = get_admin_id_from_token(token)
 
-    # attach amenities for each hall
+    halls = (
+        db.query(Hall)
+        .filter(
+            Hall.deleted == False,
+            Hall.admin_id == admin_id
+        )
+        .all()
+    )
+
     for hall in halls:
         hall.amenities = [a for a in hall.amenities]
 
