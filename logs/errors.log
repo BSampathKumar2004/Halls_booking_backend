@@ -1,0 +1,10 @@
+2026-01-26 07:53:15.148 | ERROR    | app.main:log_requests:30 - ERROR: http://0.0.0.0:8005/auth/admin/register -> (psycopg2.errors.UndefinedTable) relation "admins" does not exist
+LINE 2: FROM admins 
+             ^
+
+[SQL: SELECT admins.id AS admins_id, admins.name AS admins_name, admins.email AS admins_email, admins.password_hash AS admins_password_hash 
+FROM admins 
+WHERE admins.email = %(email_1)s 
+ LIMIT %(param_1)s]
+[parameters: {'email_1': 'sam@gmail.com', 'param_1': 1}]
+(Background on this error at: https://sqlalche.me/e/20/f405)

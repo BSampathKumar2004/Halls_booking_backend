@@ -898,3 +898,24 @@
 2025-12-20T05:16:12.711493+0000 | INFO | RESPONSE: 401 http://10.70.9.131:8005/auth/user/login
 2025-12-20T05:16:27.428882+0000 | INFO | REQUEST: POST http://10.70.9.131:8005/auth/admin/login
 2025-12-20T05:16:27.512645+0000 | INFO | RESPONSE: 401 http://10.70.9.131:8005/auth/admin/login
+2026-01-26T07:52:40.569000+0000 | INFO | REQUEST: GET http://0.0.0.0:8005/docs
+2026-01-26T07:52:40.569901+0000 | INFO | RESPONSE: 200 http://0.0.0.0:8005/docs
+2026-01-26T07:52:41.401676+0000 | INFO | REQUEST: GET http://0.0.0.0:8005/openapi.json
+2026-01-26T07:52:41.497048+0000 | INFO | RESPONSE: 200 http://0.0.0.0:8005/openapi.json
+2026-01-26T07:53:15.066026+0000 | INFO | REQUEST: POST http://0.0.0.0:8005/auth/admin/register
+2026-01-26T07:53:15.148121+0000 | ERROR | ERROR: http://0.0.0.0:8005/auth/admin/register -> (psycopg2.errors.UndefinedTable) relation "admins" does not exist
+LINE 2: FROM admins 
+             ^
+
+[SQL: SELECT admins.id AS admins_id, admins.name AS admins_name, admins.email AS admins_email, admins.password_hash AS admins_password_hash 
+FROM admins 
+WHERE admins.email = %(email_1)s 
+ LIMIT %(param_1)s]
+[parameters: {'email_1': 'sam@gmail.com', 'param_1': 1}]
+(Background on this error at: https://sqlalche.me/e/20/f405)
+2026-01-26T08:11:51.975854+0000 | INFO | REQUEST: POST http://0.0.0.0:8005/auth/admin/register
+2026-01-26T08:11:52.466578+0000 | INFO | RESPONSE: 200 http://0.0.0.0:8005/auth/admin/register
+2026-01-26T08:34:27.188190+0000 | INFO | REQUEST: POST http://0.0.0.0:8005/auth/admin/register
+2026-01-26T08:34:27.265895+0000 | INFO | RESPONSE: 400 http://0.0.0.0:8005/auth/admin/register
+2026-01-26T08:34:28.441414+0000 | INFO | REQUEST: POST http://0.0.0.0:8005/auth/admin/register
+2026-01-26T08:34:28.445828+0000 | INFO | RESPONSE: 400 http://0.0.0.0:8005/auth/admin/register

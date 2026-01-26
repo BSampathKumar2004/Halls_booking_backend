@@ -35,11 +35,19 @@ COPY . .
 COPY .env .env
 
 # -------------------------
-# 7. Expose application port
+# 7. Copy Alembic entrypoint script
+# -------------------------
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# -------------------------
+# 8. Expose application port
 # -------------------------
 EXPOSE 8000
 
 # -------------------------
-# 8. Start FastAPI using Gunicorn + Uvicorn workers
+# 9. Run Alembic + Start FastAPI
 # -------------------------
+ENTRYPOINT ["/entrypoint.sh"]
+
 CMD ["gunicorn", "app.main:app", "-k", "uvicorn.workers.UvicornWorker", "--workers", "4", "--bind", "0.0.0.0:8000"]
