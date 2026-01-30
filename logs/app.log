@@ -1008,3 +1008,7 @@ WHERE admins.email = %(email_1)s
 2026-01-30T20:27:18.819705+0530 | INFO | RESPONSE: 200 http://127.0.0.1:8000/bookings/hall/1/available-dates?month=2025-01
 2026-01-30T20:27:28.756489+0530 | INFO | REQUEST: GET http://127.0.0.1:8000/bookings/hall/1/available-dates?month=2026-01
 2026-01-30T20:27:28.759903+0530 | INFO | RESPONSE: 200 http://127.0.0.1:8000/bookings/hall/1/available-dates?month=2026-01
+2026-01-30T20:56:29.432572+0530 | INFO | REQUEST: GET http://127.0.0.1:8000/halls/1
+2026-01-30T20:56:29.583286+0530 | INFO | RESPONSE: 200 http://127.0.0.1:8000/halls/1
+2026-01-30T20:57:38.890005+0530 | INFO | REQUEST: GET http://127.0.0.1:8000/halls/?page=1&limit=5
+2026-01-30T20:57:38.904046+0530 | INFO | RESPONSE: 200 http://127.0.0.1:8000/halls/?page=1&limit=5

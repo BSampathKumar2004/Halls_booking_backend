@@ -183,7 +183,7 @@ def list_halls(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
     )
 
     halls_data = [
-        HallOut.model_validate(h).model_dump()
+        HallOut.model_validate(h).model_dump(mode="json")
         for h in halls
     ]
 
@@ -214,7 +214,7 @@ def search_by_name(q: str, db: Session = Depends(get_db)):
 
     # ✅ ORM → Pydantic → dict
     halls_data = [
-        HallOut.model_validate(h).model_dump()
+        HallOut.model_validate(h).model_dump(mode="json")
         for h in halls
     ]
 
@@ -245,7 +245,7 @@ def filter_by_location(location: str, db: Session = Depends(get_db)):
 
     # ✅ ORM → Pydantic → dict
     halls_data = [
-        HallOut.model_validate(h).model_dump()
+        HallOut.model_validate(h).model_dump(mode="json")
         for h in halls
     ]
 
