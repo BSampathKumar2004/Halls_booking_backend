@@ -13,6 +13,9 @@ from app.schemas.hall import HallCreate, HallOut
 from app.core.auth_utils import decode_token
 from app.models.admin import Admin
 
+# 🔥 Redis helpers
+from app.core.redis import get_cache, set_cache, delete_cache
+
 router = APIRouter(prefix="/halls", tags=["Halls"])
 
 
@@ -60,7 +63,7 @@ def create_hall(data: HallCreate, token: str, db: Session = Depends(get_db)):
         price_per_day=data.price_per_day,
         weekend_price_multiplier=data.weekend_price_multiplier,
         security_deposit=data.security_deposit,
-        admin_id=admin.id,    # <-- Important: Ownership assigned
+        admin_id=admin.id,
         deleted=False
     )
 
@@ -68,13 +71,11 @@ def create_hall(data: HallCreate, token: str, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(hall)
 
-    # Add amenities
     if data.amenity_ids:
         for aid in data.amenity_ids:
             if not db.query(Amenity).filter(Amenity.id == aid).first():
                 raise HTTPException(status_code=404, detail=f"Amenity ID {aid} not found")
             db.add(HallAmenity(hall_id=hall.id, amenity_id=aid))
-
         db.commit()
 
     hall.amenities = (
@@ -84,11 +85,14 @@ def create_hall(data: HallCreate, token: str, db: Session = Depends(get_db)):
         .all()
     )
 
+    # 🧹 Clear cache
+    delete_cache("halls:*")
+
     return hall
 
 
 # =====================================================================
-# EDIT HALL  (Admin Only + Ownership Check)
+# EDIT HALL
 # =====================================================================
 @router.put("/{hall_id}", response_model=HallOut)
 def edit_hall(hall_id: int, data: HallCreate, token: str, db: Session = Depends(get_db)):
@@ -98,11 +102,9 @@ def edit_hall(hall_id: int, data: HallCreate, token: str, db: Session = Depends(
     if not hall:
         raise HTTPException(status_code=404, detail="Hall not found")
 
-    # Ownership check
     if hall.admin_id != admin.id:
         raise HTTPException(status_code=403, detail="You do not own this hall")
 
-    # Update fields
     hall.name = data.name
     hall.description = data.description
     hall.capacity = data.capacity
@@ -115,7 +117,6 @@ def edit_hall(hall_id: int, data: HallCreate, token: str, db: Session = Depends(
 
     db.commit()
 
-    # Update amenities
     db.query(HallAmenity).filter(HallAmenity.hall_id == hall.id).delete()
     if data.amenity_ids:
         for aid in data.amenity_ids:
@@ -129,11 +130,15 @@ def edit_hall(hall_id: int, data: HallCreate, token: str, db: Session = Depends(
         .all()
     )
 
+    # 🧹 Clear cache
+    delete_cache(f"hall:{hall_id}")
+    delete_cache("halls:*")
+
     return hall
 
 
 # =====================================================================
-# DELETE HALL  (Soft delete + Ownership Check)
+# DELETE HALL
 # =====================================================================
 @router.delete("/{hall_id}")
 def delete_hall(hall_id: int, token: str, db: Session = Depends(get_db)):
@@ -143,21 +148,31 @@ def delete_hall(hall_id: int, token: str, db: Session = Depends(get_db)):
     if not hall:
         raise HTTPException(status_code=404, detail="Hall not found")
 
-    # Ownership check
     if hall.admin_id != admin.id:
         raise HTTPException(status_code=403, detail="You do not own this hall")
 
     hall.deleted = True
     db.commit()
 
+    # 🧹 Clear cache
+    delete_cache(f"hall:{hall_id}")
+    delete_cache("halls:*")
+
     return {"message": "Hall deleted successfully"}
 
 
 # =====================================================================
-# LIST HALLS (Normal user / Guest)
+# LIST HALLS (CACHED)
 # =====================================================================
 @router.get("/", response_model=list[HallOut])
 def list_halls(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
+
+    cache_key = f"halls:page={page}:limit={limit}"
+
+    cached = get_cache(cache_key)
+    if cached:
+        return cached
+
     halls = (
         db.query(Hall)
         .options(joinedload(Hall.amenities))
@@ -166,121 +181,94 @@ def list_halls(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
         .limit(limit)
         .all()
     )
-    return halls
+
+    halls_data = [
+        HallOut.model_validate(h).model_dump()
+        for h in halls
+    ]
+
+    set_cache(cache_key, halls_data, ttl=60)
+
+    return halls_data
 
 
 # =====================================================================
-# SEARCH BY NAME
+# SEARCH BY NAME (CACHED)
 # =====================================================================
 @router.get("/search/name", response_model=list[HallOut])
 def search_by_name(q: str, db: Session = Depends(get_db)):
+
+    cache_key = f"halls:search:name:{q.lower()}"
+
+    cached = get_cache(cache_key)
+    if cached:
+        return cached
+
     halls = (
         db.query(Hall)
+        .options(joinedload(Hall.amenities))
         .filter(Hall.deleted == False)
         .filter(Hall.name.ilike(f"%{q}%"))
         .all()
     )
-    return halls
+
+    # ✅ ORM → Pydantic → dict
+    halls_data = [
+        HallOut.model_validate(h).model_dump()
+        for h in halls
+    ]
+
+    set_cache(cache_key, halls_data, ttl=30)
+
+    return halls_data
 
 
 # =====================================================================
-# FILTER BY LOCATION
+# FILTER BY LOCATION (CACHED)
 # =====================================================================
 @router.get("/filter/location", response_model=list[HallOut])
 def filter_by_location(location: str, db: Session = Depends(get_db)):
+
+    cache_key = f"halls:filter:location:{location.lower()}"
+
+    cached = get_cache(cache_key)
+    if cached:
+        return cached
+
     halls = (
         db.query(Hall)
+        .options(joinedload(Hall.amenities))
         .filter(Hall.deleted == False)
         .filter(Hall.location.ilike(f"%{location}%"))
         .all()
     )
-    return halls
+
+    # ✅ ORM → Pydantic → dict
+    halls_data = [
+        HallOut.model_validate(h).model_dump()
+        for h in halls
+    ]
+
+    set_cache(cache_key, halls_data, ttl=30)
+
+    return halls_data
 
 
 # =====================================================================
-# SORT BY PRICE
-# =====================================================================
-@router.get("/sort/price", response_model=list[HallOut])
-def sort_by_price(order: str = "asc", db: Session = Depends(get_db)):
-    halls = (
-        db.query(Hall)
-        .filter(Hall.deleted == False)
-        .order_by(Hall.price_per_day.asc() if order == "asc" else Hall.price_per_day.desc())
-        .all()
-    )
-    return halls
-
-
-# =====================================================================
-# SORT BY CAPACITY
-# =====================================================================
-@router.get("/sort/capacity", response_model=list[HallOut])
-def sort_by_capacity(order: str = "asc", db: Session = Depends(get_db)):
-    halls = (
-        db.query(Hall)
-        .filter(Hall.deleted == False)
-        .order_by(Hall.capacity.asc() if order == "asc" else Hall.capacity.desc())
-        .all()
-    )
-    return halls
-
-
-# =====================================================================
-# FILTER BY AMENITIES
-# =====================================================================
-@router.get("/filter/amenities", response_model=list[HallOut])
-def filter_by_amenities(amenities: str, db: Session = Depends(get_db)):
-    names = [a.strip() for a in amenities.split(",")]
-
-    halls = (
-        db.query(Hall)
-        .join(HallAmenity)
-        .join(Amenity)
-        .filter(Amenity.name.in_(names))
-        .group_by(Hall.id)
-        .having(func.count(Hall.id) >= len(names))
-        .all()
-    )
-
-    return halls
-
-
-# =====================================================================
-# FILTER BY DATE AVAILABILITY
-# =====================================================================
-@router.get("/filter/available", response_model=list[HallOut])
-def filter_by_availability(date_str: str, db: Session = Depends(get_db)):
-
-    try:
-        target_date = date.fromisoformat(date_str)
-    except:
-        raise HTTPException(status_code=400, detail="Invalid date format (YYYY-MM-DD)")
-
-    halls = (
-        db.query(Hall)
-        .filter(Hall.deleted == False)
-        .filter(
-            ~Hall.bookings.any(
-                and_(
-                    Booking.status == "booked",
-                    Booking.start_date <= target_date,
-                    Booking.end_date >= target_date
-                )
-            )
-        )
-        .all()
-    )
-
-    return halls
-
-
-# =====================================================================
-# HALL DETAILS
+# HALL DETAILS (CACHED)
 # =====================================================================
 @router.get("/{hall_id}", response_model=HallOut)
 def get_hall(hall_id: int, db: Session = Depends(get_db)):
+
+    cache_key = f"hall:{hall_id}"
+
+    cached = get_cache(cache_key)
+    if cached:
+        return cached
+
     hall = (
         db.query(Hall)
+        .options(joinedload(Hall.amenities))
         .filter(Hall.id == hall_id, Hall.deleted == False)
         .first()
     )
@@ -288,6 +276,13 @@ def get_hall(hall_id: int, db: Session = Depends(get_db)):
     if not hall:
         raise HTTPException(status_code=404, detail="Hall not found")
 
-    hall.images = db.query(HallImage).filter(HallImage.hall_id == hall_id).all()
+    hall.images = db.query(HallImage).filter(
+        HallImage.hall_id == hall_id
+    ).all()
 
-    return hall
+    # ✅ Convert ORM → Pydantic → dict
+    hall_data = HallOut.model_validate(hall).model_dump()
+
+    set_cache(cache_key, hall_data, ttl=120)
+
+    return hall_data

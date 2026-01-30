@@ -16,3 +16,4 @@ cloudinary
 loguru
 passlib[argon2]
 argon2-cffi
+redis
