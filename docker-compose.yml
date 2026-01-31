@@ -1,3 +1,73 @@
+# version: "3.9"
+
+# services:
+#   backend:
+#     build: .
+#     container_name: hall_backend
+#     restart: always
+#     ports:
+#       - "8005:8000"
+#     env_file:
+#       - .env
+#     depends_on:
+#       - postgres
+#     volumes:
+#       - .:/app
+#     networks:
+#       - backend
+
+#   postgres:
+#     image: postgres:15
+#     container_name: hall_postgres
+#     restart: always
+#     environment:
+#       POSTGRES_USER: postgres
+#       POSTGRES_PASSWORD: sampath
+#       POSTGRES_DB: hall_booking
+#     ports:
+#       - "5555:5432"   # Use this to connect locally
+#     volumes:
+#       - pgdata:/var/lib/postgresql/data
+#     networks:
+#       - backend
+
+#   pgadmin:
+#     image: dpage/pgadmin4
+#     container_name: hall_pgadmin
+#     restart: always
+#     environment:
+#       PGADMIN_DEFAULT_EMAIL: admin@admin.com
+#       PGADMIN_DEFAULT_PASSWORD: admin123
+#     ports:
+#       - "5050:80"   # pgAdmin UI at http://localhost:5050
+#     depends_on:
+#       - postgres
+#     networks:
+#       - backend
+#     volumes:
+#       - pgadmin_data:/var/lib/pgadmin
+
+#   redis:
+#     image: redis:7
+#     container_name: hall_redis
+#     restart: always
+#     ports:
+#       - "6389:6379"   # Optional: local redis-cli access
+#     networks:
+#       - backend
+
+
+# volumes:
+#   pgdata:
+#   pgadmin_data:
+
+# networks:
+#   backend:
+
+
+
+
+
 version: "3.9"
 
 services:
@@ -7,10 +77,12 @@ services:
     restart: always
     ports:
       - "8005:8000"
-    env_file:
-      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:sampath@postgres:5432/hall_booking
+      REDIS_URL: redis://redis:6379
     depends_on:
       - postgres
+      - redis
     volumes:
       - .:/app
     networks:
@@ -25,9 +97,18 @@ services:
       POSTGRES_PASSWORD: sampath
       POSTGRES_DB: hall_booking
     ports:
-      - "5555:5432"   # Use this to connect locally
+      - "5555:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    networks:
+      - backend
+
+  redis:
+    image: redis:7
+    container_name: hall_redis
+    restart: always
+    ports:
+      - "6389:6379"   # optional for local redis-cli
     networks:
       - backend
 
@@ -39,13 +120,13 @@ services:
       PGADMIN_DEFAULT_EMAIL: admin@admin.com
       PGADMIN_DEFAULT_PASSWORD: admin123
     ports:
-      - "5050:80"   # pgAdmin UI at http://localhost:5050
+      - "5050:80"
     depends_on:
       - postgres
-    networks:
-      - backend
     volumes:
       - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - backend
 
 volumes:
   pgdata:

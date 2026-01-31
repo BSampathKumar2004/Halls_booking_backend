@@ -8,7 +8,7 @@ from app.api.routes.admin_panel import router as admin_panel_router
 from app.api.routes import admin_analytics
 
 from app.db.session import SessionLocal
-from app.core.redis import redis_client
+from app.core.redis import get_redis_client
 
 # ⭐ Import logging system
 from app.core.logging_config import get_logger
@@ -90,7 +90,7 @@ def health_check(db: Session = Depends(get_db_health)):
         "redis": "unknown"
     }
 
-    # ✅ Database check
+    # DB check
     try:
         db.execute(text("SELECT 1"))
         health_status["database"] = "ok"
@@ -98,17 +98,17 @@ def health_check(db: Session = Depends(get_db_health)):
         health_status["database"] = "down"
         health_status["status"] = "error"
 
-    # ✅ Redis check (optional, non-blocking)
+    # Redis check (FIXED)
     try:
-        if redis_client:
-            redis_client.ping()
+        client = get_redis_client()
+        if client:
+            client.ping()
             health_status["redis"] = "ok"
         else:
             health_status["redis"] = "not_configured"
     except Exception:
         health_status["redis"] = "down"
 
-    # ❌ If DB is down → return 500
     if health_status["database"] != "ok":
         raise HTTPException(status_code=500, detail=health_status)
 
