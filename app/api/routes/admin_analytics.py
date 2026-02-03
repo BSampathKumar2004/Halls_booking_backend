@@ -1,13 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from datetime import datetime
 
 from app.db.session import SessionLocal
 from app.models.booking import Booking
 from app.models.hall import Hall
-from app.core.auth_utils import decode_token
 from app.core.logging_config import get_logger
+from app.core.dependencies import get_current_principal
 
 router = APIRouter(prefix="/admin-analytics", tags=["Admin Analytics"])
 logger = get_logger()
@@ -22,20 +21,18 @@ def get_db():
         db.close()
 
 
-# ---------------- ADMIN VALIDATION ----------------
-def require_admin(token: str, db: Session):
-    payload = decode_token(token)
-    if payload["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Admins only")
-    return payload["sub"]
-
-
 # =====================================================================
-# 1. TOTAL REVENUE (ALL TIME)
+# 1. TOTAL REVENUE (ALL TIME) – ADMIN ONLY
 # =====================================================================
 @router.get("/revenue/total")
-def total_revenue(token: str, db: Session = Depends(get_db)):
-    require_admin(token, db)
+def total_revenue(
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     total = db.query(func.sum(Booking.total_price)).filter(
         Booking.payment_status == "success"
@@ -43,17 +40,26 @@ def total_revenue(token: str, db: Session = Depends(get_db)):
 
     total = float(total or 0)
 
-    logger.bind(log_type="admin").info(f"Admin checked total revenue → {total}")
+    logger.bind(log_type="admin").info(
+        f"Admin checked total revenue → {total}"
+    )
 
     return {"total_revenue": total}
 
 
 # =====================================================================
-# 2. MONTHLY REVENUE
+# 2. MONTHLY REVENUE – ADMIN ONLY
 # =====================================================================
 @router.get("/revenue/monthly")
-def monthly_revenue(token: str, year: int, db: Session = Depends(get_db)):
-    require_admin(token, db)
+def monthly_revenue(
+    year: int,
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     results = (
         db.query(
@@ -70,20 +76,29 @@ def monthly_revenue(token: str, year: int, db: Session = Depends(get_db)):
     )
 
     monthly_data = [
-        {"month": int(r.month), "revenue": float(r.revenue or 0)} for r in results
+        {"month": int(r.month), "revenue": float(r.revenue or 0)}
+        for r in results
     ]
 
-    logger.bind(log_type="admin").info(f"Admin checked monthly revenue for {year}")
+    logger.bind(log_type="admin").info(
+        f"Admin checked monthly revenue for {year}"
+    )
 
     return {"year": year, "monthly_revenue": monthly_data}
 
 
 # =====================================================================
-# 3. REVENUE PER HALL
+# 3. REVENUE PER HALL – ADMIN ONLY
 # =====================================================================
 @router.get("/revenue/halls")
-def revenue_per_hall(token: str, db: Session = Depends(get_db)):
-    require_admin(token, db)
+def revenue_per_hall(
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     results = (
         db.query(
@@ -99,21 +114,33 @@ def revenue_per_hall(token: str, db: Session = Depends(get_db)):
     )
 
     data = [
-        {"hall_id": r.id, "hall_name": r.name, "revenue": float(r.revenue or 0)}
+        {
+            "hall_id": r.id,
+            "hall_name": r.name,
+            "revenue": float(r.revenue or 0)
+        }
         for r in results
     ]
 
-    logger.bind(log_type="admin").info("Admin checked revenue per hall")
+    logger.bind(log_type="admin").info(
+        "Admin checked revenue per hall"
+    )
 
     return data
 
 
 # =====================================================================
-# 4. BOOKING COUNT PER HALL
+# 4. BOOKING COUNT PER HALL – ADMIN ONLY
 # =====================================================================
 @router.get("/bookings/hall-count")
-def booking_count_per_hall(token: str, db: Session = Depends(get_db)):
-    require_admin(token, db)
+def booking_count_per_hall(
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     results = (
         db.query(
@@ -128,41 +155,64 @@ def booking_count_per_hall(token: str, db: Session = Depends(get_db)):
     )
 
     data = [
-        {"hall_id": r.id, "hall_name": r.name, "booking_count": r.booking_count}
+        {
+            "hall_id": r.id,
+            "hall_name": r.name,
+            "booking_count": r.booking_count
+        }
         for r in results
     ]
 
-    logger.bind(log_type="admin").info("Admin checked booking count per hall")
+    logger.bind(log_type="admin").info(
+        "Admin checked booking count per hall"
+    )
 
     return data
 
 
 # =====================================================================
-# 5. PAYMENT MODE STATISTICS
+# 5. PAYMENT MODE STATISTICS – ADMIN ONLY
 # =====================================================================
 @router.get("/payments/stats")
-def payment_stats(token: str, db: Session = Depends(get_db)):
-    require_admin(token, db)
+def payment_stats(
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     online = (
         db.query(func.count(Booking.id))
-        .filter(Booking.payment_mode == "online", Booking.payment_status == "success")
+        .filter(
+            Booking.payment_mode == "online",
+            Booking.payment_status == "success"
+        )
         .scalar()
     )
 
     cash = (
         db.query(func.count(Booking.id))
-        .filter(Booking.payment_mode == "venue", Booking.payment_status == "pending")
+        .filter(
+            Booking.payment_mode == "venue",
+            Booking.payment_status == "pending"
+        )
         .scalar()
     )
 
     failed_online = (
         db.query(func.count(Booking.id))
-        .filter(Booking.payment_mode == "online", Booking.payment_status == "failed")
+        .filter(
+            Booking.payment_mode == "online",
+            Booking.payment_status == "failed"
+        )
         .scalar()
     )
 
-    logger.bind(log_type="admin").info("Admin checked payment stats")
+    logger.bind(log_type="admin").info(
+        "Admin checked payment stats"
+    )
 
     return {
         "online_payments": online or 0,

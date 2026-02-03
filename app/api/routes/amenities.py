@@ -6,8 +6,7 @@ from app.models.amenities import Amenity
 from app.models.hall_amenities import HallAmenity
 from app.models.hall import Hall
 from app.schemas.amenities import AmenityCreate, AmenityOut
-
-from app.core.auth_utils import decode_token   # <-- Unified decoder
+from app.core.dependencies import get_current_principal
 
 router = APIRouter(prefix="/amenities", tags=["Amenities"])
 
@@ -21,27 +20,19 @@ def get_db():
         db.close()
 
 
-# ---------------- VALIDATE ADMIN ----------------
-def require_admin(token: str):
-    payload = decode_token(token)      # <-- Shared decode
-    role = payload.get("role")
-
-    if role != "admin":
-        raise HTTPException(status_code=403, detail="Admins only")
-
-    return payload["sub"]
-
-
 # =====================================================================
-#                           CREATE AMENITY
+#                           CREATE AMENITY (ADMIN ONLY)
 # =====================================================================
 @router.post("/", response_model=AmenityOut)
 def create_amenity(
     data: AmenityCreate,
-    token: str,
+    principal=Depends(get_current_principal),
     db: Session = Depends(get_db)
 ):
-    require_admin(token)
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     existing = db.query(Amenity).filter(Amenity.name.ilike(data.name)).first()
     if existing:
@@ -56,18 +47,25 @@ def create_amenity(
 
 
 # =====================================================================
-#                   ASSIGN AMENITIES TO A HALL
+#                   ASSIGN AMENITIES TO A HALL (ADMIN ONLY)
 # =====================================================================
 @router.post("/assign/{hall_id}")
 def assign_amenities(
     hall_id: int,
     amenity_ids: list[int],
-    token: str,
+    principal=Depends(get_current_principal),
     db: Session = Depends(get_db)
 ):
-    require_admin(token)
+    admin, role = principal
 
-    hall = db.query(Hall).filter(Hall.id == hall_id, Hall.deleted == False).first()
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
+
+    hall = db.query(Hall).filter(
+        Hall.id == hall_id,
+        Hall.deleted == False
+    ).first()
+
     if not hall:
         raise HTTPException(status_code=404, detail="Hall not found")
 
@@ -75,7 +73,10 @@ def assign_amenities(
 
         amenity_exists = db.query(Amenity).filter(Amenity.id == amenity_id).first()
         if not amenity_exists:
-            raise HTTPException(status_code=404, detail=f"Amenity ID {amenity_id} not found")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Amenity ID {amenity_id} not found"
+            )
 
         already_assigned = db.query(HallAmenity).filter(
             HallAmenity.hall_id == hall_id,
@@ -91,7 +92,7 @@ def assign_amenities(
 
 
 # =====================================================================
-#                           LIST ALL AMENITIES
+#                           LIST ALL AMENITIES (PUBLIC)
 # =====================================================================
 @router.get("/", response_model=list[AmenityOut])
 def list_amenities(db: Session = Depends(get_db)):
@@ -99,12 +100,16 @@ def list_amenities(db: Session = Depends(get_db)):
 
 
 # =====================================================================
-#                     GET AMENITIES FOR A SPECIFIC HALL
+#                     GET AMENITIES FOR A SPECIFIC HALL (PUBLIC)
 # =====================================================================
 @router.get("/hall/{hall_id}", response_model=list[AmenityOut])
 def hall_amenities(hall_id: int, db: Session = Depends(get_db)):
 
-    hall = db.query(Hall).filter(Hall.id == hall_id, Hall.deleted == False).first()
+    hall = db.query(Hall).filter(
+        Hall.id == hall_id,
+        Hall.deleted == False
+    ).first()
+
     if not hall:
         raise HTTPException(status_code=404, detail="Hall not found")
 

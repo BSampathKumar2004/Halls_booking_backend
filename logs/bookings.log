@@ -1,3 +1,5 @@
 2025-12-12T12:04:42.824120+0000 | INFO | Booking Created: User=user1@test.com Hall=2 2025-12-13→2025-12-15
 2025-12-13T04:05:28.054561+0000 | INFO | Conflict: Hall 2 for 2025-12-10 12:04:12 → 2025-12-11 12:04:12
 2025-12-13T04:05:35.026062+0000 | INFO | Conflict: Hall 2 for 2025-12-10 12:04:12 → 2025-12-11 12:04:12
+2026-02-03T15:21:56.225218+0000 | INFO | Booking Created | User=appu@gmail.com | Hall=1
+2026-02-03T15:57:08.483057+0000 | INFO | Booking Created | User=appu@gmail.com | Hall=2

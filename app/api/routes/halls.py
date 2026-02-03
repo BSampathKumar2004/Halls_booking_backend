@@ -1,17 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, func
-from datetime import date
+from sqlalchemy import func
 
 from app.db.session import SessionLocal
 from app.models.hall import Hall
 from app.models.hall_amenities import HallAmenity
 from app.models.amenities import Amenity
 from app.models.hall_image import HallImage
-from app.models.booking import Booking
 from app.schemas.hall import HallCreate, HallOut
-from app.core.auth_utils import decode_token
-from app.models.admin import Admin
+from app.core.dependencies import get_current_principal
 
 # 🔥 Redis helpers
 from app.core.redis import get_cache, set_cache, delete_cache
@@ -30,28 +27,19 @@ def get_db():
         db.close()
 
 
-# --------------------------------------------------
-# Admin validation + return admin object
-# --------------------------------------------------
-def require_admin(token: str, db: Session):
-    payload = decode_token(token)
-
-    if payload["role"] != "admin":
-        raise HTTPException(status_code=401, detail="Admins only")
-
-    admin = db.query(Admin).filter(Admin.email == payload["sub"]).first()
-    if not admin:
-        raise HTTPException(status_code=404, detail="Admin not found")
-
-    return admin
-
-
 # =====================================================================
-# CREATE HALL  (Admin Only)
+# CREATE HALL  (ADMIN ONLY)
 # =====================================================================
 @router.post("/", response_model=HallOut)
-def create_hall(data: HallCreate, token: str, db: Session = Depends(get_db)):
-    admin = require_admin(token, db)
+def create_hall(
+    data: HallCreate,
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     hall = Hall(
         name=data.name,
@@ -73,7 +61,8 @@ def create_hall(data: HallCreate, token: str, db: Session = Depends(get_db)):
 
     if data.amenity_ids:
         for aid in data.amenity_ids:
-            if not db.query(Amenity).filter(Amenity.id == aid).first():
+            amenity = db.query(Amenity).filter(Amenity.id == aid).first()
+            if not amenity:
                 raise HTTPException(status_code=404, detail=f"Amenity ID {aid} not found")
             db.add(HallAmenity(hall_id=hall.id, amenity_id=aid))
         db.commit()
@@ -92,13 +81,25 @@ def create_hall(data: HallCreate, token: str, db: Session = Depends(get_db)):
 
 
 # =====================================================================
-# EDIT HALL
+# EDIT HALL (ADMIN ONLY)
 # =====================================================================
 @router.put("/{hall_id}", response_model=HallOut)
-def edit_hall(hall_id: int, data: HallCreate, token: str, db: Session = Depends(get_db)):
-    admin = require_admin(token, db)
+def edit_hall(
+    hall_id: int,
+    data: HallCreate,
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
 
-    hall = db.query(Hall).filter(Hall.id == hall_id, Hall.deleted == False).first()
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
+
+    hall = db.query(Hall).filter(
+        Hall.id == hall_id,
+        Hall.deleted == False
+    ).first()
+
     if not hall:
         raise HTTPException(status_code=404, detail="Hall not found")
 
@@ -138,13 +139,24 @@ def edit_hall(hall_id: int, data: HallCreate, token: str, db: Session = Depends(
 
 
 # =====================================================================
-# DELETE HALL
+# DELETE HALL (ADMIN ONLY)
 # =====================================================================
 @router.delete("/{hall_id}")
-def delete_hall(hall_id: int, token: str, db: Session = Depends(get_db)):
-    admin = require_admin(token, db)
+def delete_hall(
+    hall_id: int,
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
 
-    hall = db.query(Hall).filter(Hall.id == hall_id, Hall.deleted == False).first()
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
+
+    hall = db.query(Hall).filter(
+        Hall.id == hall_id,
+        Hall.deleted == False
+    ).first()
+
     if not hall:
         raise HTTPException(status_code=404, detail="Hall not found")
 
@@ -162,11 +174,14 @@ def delete_hall(hall_id: int, token: str, db: Session = Depends(get_db)):
 
 
 # =====================================================================
-# LIST HALLS (CACHED)
+# LIST HALLS (PUBLIC – CACHED)
 # =====================================================================
 @router.get("/", response_model=list[HallOut])
-def list_halls(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
-
+def list_halls(
+    page: int = 1,
+    limit: int = 10,
+    db: Session = Depends(get_db),
+):
     cache_key = f"halls:page={page}:limit={limit}"
 
     cached = get_cache(cache_key)
@@ -193,7 +208,7 @@ def list_halls(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
 
 
 # =====================================================================
-# SEARCH BY NAME (CACHED)
+# SEARCH BY NAME (PUBLIC – CACHED)
 # =====================================================================
 @router.get("/search/name", response_model=list[HallOut])
 def search_by_name(q: str, db: Session = Depends(get_db)):
@@ -212,7 +227,6 @@ def search_by_name(q: str, db: Session = Depends(get_db)):
         .all()
     )
 
-    # ✅ ORM → Pydantic → dict
     halls_data = [
         HallOut.model_validate(h).model_dump(mode="json")
         for h in halls
@@ -224,7 +238,7 @@ def search_by_name(q: str, db: Session = Depends(get_db)):
 
 
 # =====================================================================
-# FILTER BY LOCATION (CACHED)
+# FILTER BY LOCATION (PUBLIC – CACHED)
 # =====================================================================
 @router.get("/filter/location", response_model=list[HallOut])
 def filter_by_location(location: str, db: Session = Depends(get_db)):
@@ -243,7 +257,6 @@ def filter_by_location(location: str, db: Session = Depends(get_db)):
         .all()
     )
 
-    # ✅ ORM → Pydantic → dict
     halls_data = [
         HallOut.model_validate(h).model_dump(mode="json")
         for h in halls
@@ -255,7 +268,7 @@ def filter_by_location(location: str, db: Session = Depends(get_db)):
 
 
 # =====================================================================
-# HALL DETAILS (CACHED)
+# HALL DETAILS (PUBLIC – CACHED)
 # =====================================================================
 @router.get("/{hall_id}", response_model=HallOut)
 def get_hall(hall_id: int, db: Session = Depends(get_db)):
@@ -280,7 +293,6 @@ def get_hall(hall_id: int, db: Session = Depends(get_db)):
         HallImage.hall_id == hall_id
     ).all()
 
-    # ✅ Convert ORM → Pydantic → dict
     hall_data = HallOut.model_validate(hall).model_dump()
 
     set_cache(cache_key, hall_data, ttl=120)

@@ -1,7 +1,5 @@
 from fastapi import APIRouter, File, UploadFile, Depends, HTTPException, Form
 from sqlalchemy.orm import Session
-from jose import jwt
-import os
 from PIL import Image
 import io
 
@@ -9,6 +7,7 @@ from app.db.session import SessionLocal
 from app.models.hall import Hall
 from app.models.hall_image import HallImage
 from app.utils.cloudinary_utils import upload_image, delete_image
+from app.core.dependencies import get_current_principal
 
 router = APIRouter(prefix="/hall-images", tags=["Hall Images"])
 
@@ -20,21 +19,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-# ---------------- ADMIN TOKEN VALIDATION ----------------
-def get_current_admin(token: str):
-    try:
-        payload = jwt.decode(
-            token,
-            os.getenv("JWT_SECRET"),
-            algorithms=[os.getenv("JWT_ALGORITHM")]
-        )
-        if payload.get("role") != "admin":
-            raise HTTPException(status_code=401, detail="Admins only")
-        return payload.get("sub")
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 # =====================================================================
@@ -56,17 +40,20 @@ def convert_to_jpeg(upload_file: UploadFile) -> bytes:
 
 
 # =====================================================================
-#                       UPLOAD IMAGE(S)
+#                       UPLOAD IMAGE(S) (ADMIN ONLY)
 # =====================================================================
 @router.post("/{hall_id}")
 async def upload_hall_image(
     hall_id: int,
-    token: str,
     files: list[UploadFile] = File(...),
     is_main: bool = Form(False),
-    db: Session = Depends(get_db)
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
 ):
-    get_current_admin(token)
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     hall = db.query(Hall).filter(
         Hall.id == hall_id,
@@ -105,18 +92,15 @@ async def upload_hall_image(
         # AUTO-CONVERT TO JPEG BEFORE UPLOAD
         jpeg_bytes = convert_to_jpeg(file)
 
-        # Cloudinary upload (expects raw bytes)
+        # Cloudinary upload
         result = upload_image(jpeg_bytes)
         if not result:
             raise HTTPException(status_code=500, detail="Cloud upload failed")
 
-        image_url = result["url"]
-        public_id = result["public_id"]
-
         hall_image = HallImage(
             hall_id=hall.id,
-            image_url=image_url,
-            public_id=public_id,
+            image_url=result["url"],
+            public_id=result["public_id"],
             is_main=is_main
         )
 
@@ -138,7 +122,7 @@ async def upload_hall_image(
 
 
 # =====================================================================
-#                       LIST IMAGES FOR A HALL
+#                       LIST IMAGES FOR A HALL (PUBLIC)
 # =====================================================================
 @router.get("/{hall_id}")
 def list_hall_images(hall_id: int, db: Session = Depends(get_db)):
@@ -172,11 +156,18 @@ def list_hall_images(hall_id: int, db: Session = Depends(get_db)):
 
 
 # =====================================================================
-#                       DELETE IMAGE
+#                       DELETE IMAGE (ADMIN ONLY)
 # =====================================================================
 @router.delete("/{image_id}")
-def delete_hall_image(image_id: int, token: str, db: Session = Depends(get_db)):
-    get_current_admin(token)
+def delete_hall_image(
+    image_id: int,
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     image = db.query(HallImage).filter(
         HallImage.id == image_id

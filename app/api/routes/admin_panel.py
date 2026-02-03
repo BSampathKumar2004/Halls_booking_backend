@@ -1,7 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from jose import jwt
-import os
 
 from app.db.session import SessionLocal
 from app.models.user import User
@@ -10,6 +8,7 @@ from app.models.hall import Hall
 from app.schemas.user import UserOut
 from app.schemas.admin import AdminOut
 from app.schemas.hall import HallOut
+from app.core.dependencies import get_current_principal
 
 router = APIRouter(prefix="/admin-panel", tags=["Admin Panel"])
 
@@ -25,58 +24,50 @@ def get_db():
         db.close()
 
 
-# --------------------------------------------------
-# ADMIN VALIDATION
-# --------------------------------------------------
-def validate_admin(token: str, db: Session) -> Admin:
-    try:
-        payload = jwt.decode(
-            token,
-            os.getenv("JWT_SECRET"),
-            algorithms=[os.getenv("JWT_ALGORITHM")]
-        )
-
-        if payload.get("role") != "admin":
-            raise HTTPException(status_code=403, detail="Admins only")
-
-        email = payload.get("sub")
-
-        admin = db.query(Admin).filter(Admin.email == email).first()
-        if not admin:
-            raise HTTPException(status_code=404, detail="Admin not found")
-
-        return admin
-
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-
 # ==================================================
-# GET ALL USERS (ADMIN)
+# GET ALL USERS (ADMIN ONLY)
 # ==================================================
 @router.get("/users", response_model=list[UserOut])
-def get_all_users(token: str, db: Session = Depends(get_db)):
-    validate_admin(token, db)
+def get_all_users(
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
+
     return db.query(User).all()
 
 
 # ==================================================
-# GET ALL ADMINS
+# GET ALL ADMINS (ADMIN ONLY)
 # ==================================================
 @router.get("/admins", response_model=list[AdminOut])
-def get_all_admins(token: str, db: Session = Depends(get_db)):
-    validate_admin(token, db)
+def get_all_admins(
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
+
     return db.query(Admin).all()
 
 
 # ==================================================
-# GET ONLY LOGGED-IN ADMIN'S HALLS ✅
+# GET ONLY LOGGED-IN ADMIN'S HALLS ✅ (ADMIN ONLY)
 # ==================================================
 @router.get("/halls", response_model=list[HallOut])
-def get_all_halls(token: str, db: Session = Depends(get_db)):
-    admin = validate_admin(token, db)
+def get_all_halls(
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Admins only")
 
     halls = (
         db.query(Hall)

@@ -1,6 +1,35 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from datetime import date
+
+from app.db.session import SessionLocal
+from app.models.hall import Hall
+from app.models.user import User
+from app.models.booking import Booking
+from app.core.dependencies import get_current_principal
+
+router = APIRouter(prefix="/admin", tags=["Admin"])
+
+
+# ---------------- DB SESSION ----------------
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+# ==================================================
+# ADMIN DASHBOARD STATS
+# ==================================================
 @router.get("/stats")
-def admin_stats(token: str, db: Session = Depends(get_db)):
-    user, role = resolve_token_user(token, db)
+def admin_stats(
+    principal=Depends(get_current_principal),
+    db: Session = Depends(get_db),
+):
+    admin, role = principal
+
     if role != "admin":
         raise HTTPException(status_code=403, detail="Admins only")
 
@@ -10,7 +39,7 @@ def admin_stats(token: str, db: Session = Depends(get_db)):
 
     today = date.today()
     today_bookings = db.query(Booking).filter(
-        Booking.start_date <= today, 
+        Booking.start_date <= today,
         Booking.end_date >= today
     ).count()
 
