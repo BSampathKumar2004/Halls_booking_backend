@@ -10,6 +10,7 @@ from app.schemas.booking import BookingCreate, BookingOut
 from app.utils.razorpay_client import razorpay_client
 from app.core.logging_config import get_logger
 from app.core.dependencies import get_current_principal
+from app.models.enums import BookingStatus, PaymentStatus, PaymentMode
 
 router = APIRouter(prefix="/bookings", tags=["Bookings"])
 logger = get_logger()
@@ -27,71 +28,81 @@ def get_db():
 
 
 # ---------------------------------------------------------------------
-# DOUBLE BOOKING CHECK
+# DOUBLE BOOKING CHECK (OLD LOGIC, ENUM SAFE)
 # ---------------------------------------------------------------------
 def has_conflict(db: Session, hall_id: int, start_date, end_date, start_time, end_time):
-    conflict = db.query(Booking.id).filter(
+    bookings = db.query(Booking).filter(
         Booking.hall_id == hall_id,
-        Booking.status == "booked",
-
+        Booking.status == BookingStatus.BOOKED.value,
         Booking.start_date <= end_date,
         Booking.end_date >= start_date,
+    ).all()
 
-        or_(
-            Booking.start_date != Booking.end_date,
-            start_date != end_date,
+    for b in bookings:
 
-            and_(
-                Booking.start_date == Booking.end_date,
-                start_date == end_date,
-                Booking.start_time < end_time,
-                Booking.end_time > start_time
-            )
-        )
-    ).first()
+        # Case 1: Fully inside multi-day booking
+        if b.start_date < start_date < b.end_date:
+            return True
 
-    return conflict is not None
+        # Case 2: Same-day overlap
+        if start_date == end_date == b.start_date == b.end_date:
+            if b.start_time < end_time and b.end_time > start_time:
+                return True
 
+        # Case 3: Booking starts on existing booking's start day
+        if start_date == b.start_date and b.start_date != b.end_date:
+            if b.start_time < end_time:
+                return True
+
+        # Case 4: Booking ends on existing booking's end day
+        if end_date == b.end_date and b.start_date != b.end_date:
+            if b.end_time > start_time:
+                return True
+
+        # Case 5: Fully covered day
+        if start_date < b.start_date and end_date > b.end_date:
+            return True
+
+    return False
 
 # ---------------------------------------------------------------------
-# PRICE CALCULATION
+# PRICE CALCULATION (FIXED & CORRECT)
 # ---------------------------------------------------------------------
 def calculate_price(hall: Hall, start_date, end_date, start_time, end_time):
-    # Same-day booking
-    if start_date == end_date:
-        hours = (
-            (end_time.hour + end_time.minute / 60)
-            - (start_time.hour + start_time.minute / 60)
-        )
+    total = 0.0
+    current = start_date
 
-        if hours <= 0:
-            raise HTTPException(status_code=400, detail="Invalid booking duration")
+    while current <= end_date:
+        is_weekend = current.weekday() >= 5
+        multiplier = hall.weekend_price_multiplier if is_weekend else 1
 
-        total = hours * hall.price_per_hour
-        if start_date.weekday() >= 5:
-            total *= hall.weekend_price_multiplier
+        # SAME DAY
+        if start_date == end_date:
+            hours = (
+                (end_time.hour + end_time.minute / 60)
+                - (start_time.hour + start_time.minute / 60)
+            )
+            if hours <= 0:
+                raise HTTPException(status_code=400, detail="Invalid booking duration")
 
-        return round(total + hall.security_deposit, 2)
+            total += hours * hall.price_per_hour * multiplier
+            break
 
-    # Multi-day booking
-    total = 0
+        # FIRST DAY
+        if current == start_date:
+            hours = 24 - (start_time.hour + start_time.minute / 60)
+            total += hours * hall.price_per_hour * multiplier
 
-    start_hours = 24 - (start_time.hour + start_time.minute / 60)
-    total += start_hours * hall.price_per_hour
+        # LAST DAY
+        elif current == end_date:
+            hours = end_time.hour + end_time.minute / 60
+            total += hours * hall.price_per_hour * multiplier
 
-    full_days = (end_date - start_date).days - 1
-    for i in range(full_days):
-        weekday = (start_date + timedelta(days=i + 1)).weekday()
-        rate = hall.price_per_day
-        if weekday >= 5:
-            rate *= hall.weekend_price_multiplier
-        total += rate
+        # FULL DAY
+        else:
+            total += hall.price_per_day * multiplier
 
-    end_hours = end_time.hour + end_time.minute / 60
-    total += end_hours * hall.price_per_hour
-
-    if end_date.weekday() >= 5:
-        total *= hall.weekend_price_multiplier
+        current += timedelta(days=1)
 
     return round(total + hall.security_deposit, 2)
 
@@ -106,7 +117,6 @@ def create_booking(
     db: Session = Depends(get_db),
 ):
     user, role = principal
-
     if role != "user":
         raise HTTPException(status_code=403, detail="Only users can book halls")
 
@@ -119,21 +129,18 @@ def create_booking(
 
     now = datetime.now()
 
-    # ---- DATE VALIDATIONS ----
     if data.start_date < date.today():
         raise HTTPException(status_code=400, detail="Cannot book past dates")
 
     if data.end_date < data.start_date:
         raise HTTPException(status_code=400, detail="End date cannot be before start date")
 
-    # ---- TIME VALIDATIONS ----
     if data.start_date == date.today() and data.start_time <= now.time():
         raise HTTPException(status_code=400, detail="Start time must be in the future")
 
     if data.start_date == data.end_date and data.end_time <= data.start_time:
         raise HTTPException(status_code=400, detail="End time must be after start time")
 
-    # ---- DOUBLE BOOKING CHECK ----
     if has_conflict(
         db,
         data.hall_id,
@@ -142,12 +149,8 @@ def create_booking(
         data.start_time,
         data.end_time,
     ):
-        raise HTTPException(
-            status_code=400,
-            detail="Hall already booked for this time range"
-        )
+        raise HTTPException(status_code=400, detail="Hall already booked for this time range")
 
-    # ---- PRICE ----
     total_price = calculate_price(
         hall,
         data.start_date,
@@ -163,22 +166,19 @@ def create_booking(
         end_date=data.end_date,
         start_time=data.start_time,
         end_time=data.end_time,
-        status="booked",
+        status=BookingStatus.BOOKED.value,
         total_price=total_price,
-        payment_mode=data.payment_mode,
-        payment_status="pending",
+        payment_mode=data.payment_mode.value,
+        payment_status=PaymentStatus.PENDING.value,
     )
 
     db.add(booking)
     db.commit()
     db.refresh(booking)
 
-    logger.bind(log_type="booking").info(
-        f"Booking Created | User={user.email} | Hall={booking.hall_id}"
-    )
+    logger.info(f"Booking Created | User={user.email} | Hall={booking.hall_id}")
 
-    # ---- ONLINE PAYMENT ----
-    if data.payment_mode == "online":
+    if data.payment_mode == PaymentMode.ONLINE:
         rp_order = razorpay_client.order.create({
             "amount": int(total_price * 100),
             "currency": "INR",
@@ -200,7 +200,7 @@ def create_booking(
         "message": "Booking created. Pay at venue.",
         "booking_id": booking.id,
         "total_price": total_price,
-        "payment_status": "pending",
+        "payment_status": PaymentStatus.PENDING.value,
     }
 
 
@@ -219,7 +219,7 @@ def verify_payment(
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
 
-    if booking.payment_status == "success":
+    if booking.payment_status == PaymentStatus.SUCCESS.value:
         return {"message": "Payment already verified"}
 
     try:
@@ -229,11 +229,11 @@ def verify_payment(
             "razorpay_signature": razorpay_signature,
         })
     except Exception:
-        booking.payment_status = "failed"
+        booking.payment_status = PaymentStatus.FAILED.value
         db.commit()
         raise HTTPException(status_code=400, detail="Invalid payment signature")
 
-    booking.payment_status = "success"
+    booking.payment_status = PaymentStatus.SUCCESS.value
     booking.razorpay_payment_id = razorpay_payment_id
     booking.razorpay_signature = razorpay_signature
     db.commit()
@@ -250,7 +250,6 @@ def my_bookings(
     db: Session = Depends(get_db),
 ):
     user, role = principal
-
     if role != "user":
         raise HTTPException(status_code=403, detail="Users only")
 
@@ -267,6 +266,8 @@ def my_bookings(
             start_time=b.start_time,
             end_time=b.end_time,
             status=b.status,
+            payment_mode=b.payment_mode,
+            payment_status=b.payment_status,
             total_price=b.total_price,
             booked_by_name=user.name,
             booked_by_email=user.email,
@@ -285,7 +286,6 @@ def cancel_booking(
     db: Session = Depends(get_db),
 ):
     user, role = principal
-
     if role != "user":
         raise HTTPException(status_code=403, detail="Users only")
 
@@ -297,7 +297,161 @@ def cancel_booking(
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
 
-    booking.status = "cancelled"
+    booking.status = BookingStatus.CANCELLED.value
     db.commit()
 
     return {"message": "Booking cancelled successfully"}
+
+
+# =====================================================================
+# AVAILABLE DATES
+# =====================================================================
+@router.get("/hall/{hall_id}/available-dates")
+def available_dates(hall_id: int, month: str, db: Session = Depends(get_db)):
+
+    try:
+        year, month_num = map(int, month.split("-"))
+        start_date = date(year, month_num, 1)
+        end_date = (
+            date(year + month_num // 12, (month_num % 12) + 1, 1)
+            - timedelta(days=1)
+        )
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid month format (YYYY-MM)")
+
+    bookings = db.query(Booking).filter(
+        Booking.hall_id == hall_id,
+        Booking.status == BookingStatus.BOOKED.value,
+        Booking.start_date <= end_date,
+        Booking.end_date >= start_date,
+    ).all()
+
+    booked = set()
+
+    for b in bookings:
+        d = max(b.start_date, start_date)
+        last = min(b.end_date, end_date)
+        while d <= last:
+            booked.add(d)
+            d += timedelta(days=1)
+
+    all_days = [
+        start_date + timedelta(days=i)
+        for i in range((end_date - start_date).days + 1)
+    ]
+
+    available = [d.isoformat() for d in all_days if d not in booked]
+
+    return {"hall_id": hall_id, "month": month, "available_dates": available}
+
+
+# =====================================================================
+# AVAILABLE TIME SLOTS
+# =====================================================================
+@router.get("/hall/{hall_id}/available-slots")
+def available_slots(hall_id: int, date_str: str, db: Session = Depends(get_db)):
+
+    try:
+        target_date = date.fromisoformat(date_str)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid date format")
+
+    bookings = db.query(Booking).filter(
+        Booking.hall_id == hall_id,
+        Booking.status == BookingStatus.BOOKED.value,
+        Booking.start_date <= target_date,
+        Booking.end_date >= target_date,
+    ).all()
+
+    if not bookings:
+        return {
+            "hall_id": hall_id,
+            "date": date_str,
+            "available_slots": [{"start": "00:00", "end": "23:59"}],
+        }
+
+    blocked = []
+
+    for b in bookings:
+        if b.start_date < target_date < b.end_date:
+            blocked.append(("00:00", "23:59"))
+        elif target_date == b.start_date and b.start_date != b.end_date:
+            blocked.append((b.start_time.strftime("%H:%M"), "23:59"))
+        elif target_date == b.end_date and b.start_date != b.end_date:
+            blocked.append(("00:00", b.end_time.strftime("%H:%M")))
+        elif b.start_date == b.end_date == target_date:
+            blocked.append((b.start_time.strftime("%H:%M"), b.end_time.strftime("%H:%M")))
+
+    if ("00:00", "23:59") in blocked:
+        return {"hall_id": hall_id, "date": date_str, "available_slots": []}
+
+    blocked.sort()
+
+    def to_min(t):
+        return int(t[:2]) * 60 + int(t[3:])
+
+    merged = []
+    s, e = blocked[0]
+
+    for cs, ce in blocked[1:]:
+        if to_min(cs) <= to_min(e):
+            e = max(e, ce)
+        else:
+            merged.append((s, e))
+            s, e = cs, ce
+
+    merged.append((s, e))
+
+    available = []
+    last = "00:00"
+
+    for s, e in merged:
+        if to_min(s) > to_min(last):
+            available.append({"start": last, "end": s})
+        last = e
+
+    if last != "23:59":
+        available.append({"start": last, "end": "23:59"})
+
+    return {"hall_id": hall_id, "date": date_str, "available_slots": available}
+
+
+# =====================================================================
+# MULTI-HALL CALENDAR
+# =====================================================================
+@router.get("/calendar")
+def multi_hall_calendar(month: str, db: Session = Depends(get_db)):
+
+    try:
+        year, month_num = map(int, month.split("-"))
+        start_date = date(year, month_num, 1)
+        end_date = (
+            date(year + month_num // 12, (month_num % 12) + 1, 1)
+            - timedelta(days=1)
+        )
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid month format")
+
+    halls = db.query(Hall).filter(Hall.deleted == False).all()
+    hall_map = {h.id: set() for h in halls}
+
+    bookings = db.query(Booking).filter(
+        Booking.status == BookingStatus.BOOKED.value,
+        Booking.start_date <= end_date,
+        Booking.end_date >= start_date,
+    ).all()
+
+    for b in bookings:
+        d = max(b.start_date, start_date)
+        last = min(b.end_date, end_date)
+        while d <= last:
+            hall_map[b.hall_id].add(d.isoformat())
+            d += timedelta(days=1)
+
+    return {
+        "month": month,
+        "halls": [
+            {"hall_id": hid, "booked_dates": sorted(list(days))}
+            for hid, days in hall_map.items()
+        ]
+    }

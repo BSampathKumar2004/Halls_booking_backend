@@ -27,3 +27,17 @@ DETAIL:  Key (hall_id, amenity_id)=(2, 1) already exists.
 [SQL: INSERT INTO hall_amenities (hall_id, amenity_id) SELECT p0::INTEGER, p1::INTEGER FROM (VALUES (%(hall_id__0)s, %(amenity_id__0)s, 0), (%(hall_id__1)s, %(amenity_id__1)s, 1), (%(hall_id__2)s, %(amenity_id__2)s, 2), (%(hall_id__3)s, %(amenity_id__3)s, 3)) AS imp_sen(p0, p1, sen_counter) ORDER BY sen_counter RETURNING hall_amenities.id, hall_amenities.id AS id__1]
 [parameters: {'hall_id__0': 2, 'amenity_id__0': 1, 'hall_id__1': 2, 'amenity_id__1': 2, 'hall_id__2': 2, 'amenity_id__2': 3, 'hall_id__3': 2, 'amenity_id__3': 1}]
 (Background on this error at: https://sqlalche.me/e/20/gkpj)
+2026-02-03 17:30:02.921 | ERROR    | app.main:log_requests:37 - ERROR: http://10.94.86.41:8005/bookings/my -> 4 validation errors:
+  {'type': 'missing', 'loc': ('response', 0, 'booked_by_name'), 'msg': 'Field required', 'input': <app.models.booking.Booking object at 0x73b3c2674490>}
+  {'type': 'missing', 'loc': ('response', 0, 'booked_by_email'), 'msg': 'Field required', 'input': <app.models.booking.Booking object at 0x73b3c2674490>}
+  {'type': 'missing', 'loc': ('response', 1, 'booked_by_name'), 'msg': 'Field required', 'input': <app.models.booking.Booking object at 0x73b3d0099a50>}
+  {'type': 'missing', 'loc': ('response', 1, 'booked_by_email'), 'msg': 'Field required', 'input': <app.models.booking.Booking object at 0x73b3d0099a50>}
+
+  File "/app/app/api/routes/bookings.py", line 248, in my_bookings
+    GET /bookings/my
+2026-02-04 15:32:07.912 | ERROR    | app.main:log_requests:37 - ERROR: http://10.247.156.41:8005/bookings/my -> 2 validation errors:
+  {'type': 'missing', 'loc': ('response', 0, 'booked_by_name'), 'msg': 'Field required', 'input': <app.models.booking.Booking object at 0x7ac83c1db150>}
+  {'type': 'missing', 'loc': ('response', 0, 'booked_by_email'), 'msg': 'Field required', 'input': <app.models.booking.Booking object at 0x7ac83c1db150>}
+
+  File "/app/app/api/routes/bookings.py", line 248, in my_bookings
+    GET /bookings/my
