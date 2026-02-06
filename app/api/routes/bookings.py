@@ -68,41 +68,56 @@ def has_conflict(db: Session, hall_id: int, start_date, end_date, start_time, en
 # ---------------------------------------------------------------------
 # PRICE CALCULATION (FIXED & CORRECT)
 # ---------------------------------------------------------------------
-def calculate_price(hall: Hall, start_date, end_date, start_time, end_time):
-    total = 0.0
-    current = start_date
+def calculate_price(hall, start_date, end_date, start_time, end_time):
 
-    while current <= end_date:
-        is_weekend = current.weekday() >= 5
-        multiplier = hall.weekend_price_multiplier if is_weekend else 1
+    days = (end_date - start_date).days + 1
 
-        # SAME DAY
-        if start_date == end_date:
-            hours = (
-                (end_time.hour + end_time.minute / 60)
-                - (start_time.hour + start_time.minute / 60)
-            )
-            if hours <= 0:
-                raise HTTPException(status_code=400, detail="Invalid booking duration")
+    # 🟢 CASE 1: Multi-day full-day booking
+    if start_date != end_date and start_time == end_time:
+        total = 0
+        for i in range(days):
+            current_day = start_date + timedelta(days=i)
+            rate = hall.price_per_day
+            if current_day.weekday() >= 5:
+                rate *= hall.weekend_price_multiplier
+            total += rate
 
-            total += hours * hall.price_per_hour * multiplier
-            break
+        return round(total + hall.security_deposit, 2)
 
-        # FIRST DAY
-        if current == start_date:
-            hours = 24 - (start_time.hour + start_time.minute / 60)
-            total += hours * hall.price_per_hour * multiplier
+    # 🟢 CASE 2: Same-day hourly booking
+    if start_date == end_date:
+        hours = (
+            (end_time.hour + end_time.minute / 60)
+            - (start_time.hour + start_time.minute / 60)
+        )
+        if hours <= 0:
+            raise HTTPException(status_code=400, detail="Invalid booking duration")
 
-        # LAST DAY
-        elif current == end_date:
-            hours = end_time.hour + end_time.minute / 60
-            total += hours * hall.price_per_hour * multiplier
+        total = hours * hall.price_per_hour
+        if start_date.weekday() >= 5:
+            total *= hall.weekend_price_multiplier
 
-        # FULL DAY
-        else:
-            total += hall.price_per_day * multiplier
+        return round(total + hall.security_deposit, 2)
 
-        current += timedelta(days=1)
+    # 🟡 CASE 3: Mixed (hour + days)
+    total = 0
+
+    start_hours = 24 - (start_time.hour + start_time.minute / 60)
+    total += start_hours * hall.price_per_hour
+
+    full_days = (end_date - start_date).days - 1
+    for i in range(full_days):
+        weekday = (start_date + timedelta(days=i + 1)).weekday()
+        rate = hall.price_per_day
+        if weekday >= 5:
+            rate *= hall.weekend_price_multiplier
+        total += rate
+
+    end_hours = end_time.hour + end_time.minute / 60
+    total += end_hours * hall.price_per_hour
+
+    if end_date.weekday() >= 5:
+        total *= hall.weekend_price_multiplier
 
     return round(total + hall.security_deposit, 2)
 
